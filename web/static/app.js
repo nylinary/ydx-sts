@@ -105,6 +105,14 @@ function sendSessionUpdate() {
   ws.send(JSON.stringify(payload));
 }
 
+// When user changes voice while connected, push a new session.update.
+$("selVoice")?.addEventListener("change", () => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    log(`[ui] voice = ${$("selVoice").value}`);
+    sendSessionUpdate();
+  }
+});
+
 function maybeAutoResponseCreate() {
   if (!$("chkAutoResponse").checked) return;
   const payload = {
