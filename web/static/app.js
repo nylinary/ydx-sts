@@ -125,8 +125,9 @@ function playPcm16Base64(b64, sampleRate = 44100) {
 }
 
 function getModalities() {
-  // The API expects modalities values: "audio" and/or "text".
-  return ["audio", "text"];
+  // Some backends expect exactly one modality per request.
+  // Keep audio as default to avoid 'Modalities can be either audio or text' errors.
+  return ["audio"];
 }
 
 // ===== session init =====
