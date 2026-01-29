@@ -209,10 +209,29 @@ function sendSessionUpdate() {
 }
 
 // When user changes voice while connected, push a new session.update.
-$("selVoice")?.addEventListener("change", () => {
+$("selVoice")?.addEventListener("change", async () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    log(`[ui] voice = ${$("selVoice").value}`);
+    const v = $("selVoice").value;
+    log(`[ui] voice = ${v}`);
+
+    // Stop any currently playing audio to avoid overlapping/half-switched streams.
+    clearPlayback();
+
+    // Make sure AudioContext is running (some browsers suspend after device changes)
+    await resumeAudioIfNeeded();
+
+    // Re-apply session config (voice, etc.)
     sendSessionUpdate();
+
+    // Some backends can stall if a response is mid-flight; trigger a fresh response
+    // only if auto-response is enabled.
+    if ($("chkAutoResponse")?.checked) {
+      try {
+        ws.send(JSON.stringify({ type: "response.cancel" }));
+      } catch {
+        // ignore
+      }
+    }
   }
 });
 
