@@ -217,21 +217,15 @@ $("selVoice")?.addEventListener("change", async () => {
     // Stop any currently playing audio to avoid overlapping/half-switched streams.
     clearPlayback();
 
-    // Make sure AudioContext is running (some browsers suspend after device changes)
+    // Make sure AudioContext is running
     await resumeAudioIfNeeded();
 
     // Re-apply session config (voice, etc.)
     sendSessionUpdate();
 
-    // Some backends can stall if a response is mid-flight; trigger a fresh response
-    // only if auto-response is enabled.
-    if ($("chkAutoResponse")?.checked) {
-      try {
-        ws.send(JSON.stringify({ type: "response.cancel" }));
-      } catch {
-        // ignore
-      }
-    }
+    // Do NOT send response.cancel here: server can respond with
+    // "no such response: unknown_response" and the session may get into a bad state.
+    log("[ui] voice applied (will affect next response)");
   }
 });
 
@@ -242,6 +236,13 @@ function maybeAutoResponseCreate() {
     response: { modalities: getModalities(), conversation: "default" },
   };
   ws.send(JSON.stringify(payload));
+}
+
+// Improve server error visibility
+function logServerError(msg) {
+  const e = msg?.error;
+  const message = e?.message || "unknown";
+  log(`[error] ${message}`);
 }
 
 // ===== mic capture =====
@@ -395,7 +396,7 @@ function start() {
     }
 
     if (t === "error") {
-      log("[error]", msg);
+      logServerError(msg);
       return;
     }
 
