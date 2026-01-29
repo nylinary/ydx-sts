@@ -133,7 +133,6 @@ function getModalities() {
 // ===== session init =====
 function sendSessionUpdate() {
   const instructions = $("txtInstructions").value || "";
-  const useServerVad = $("chkServerVad").checked;
   const voice = ($("selVoice")?.value || "dasha").trim();
 
   const payload = {
@@ -144,9 +143,7 @@ function sendSessionUpdate() {
       audio: {
         input: {
           format: { type: "audio/pcm", rate: IN_RATE, channels: 1 },
-          turn_detection: useServerVad
-            ? { type: "server_vad", threshold: 0.5, silence_duration_ms: 400 }
-            : { type: "none" },
+          turn_detection: { type: "server_vad", threshold: 0.5, silence_duration_ms: 400 },
         },
         output: {
           format: { type: "audio/pcm", rate: 44100 },
