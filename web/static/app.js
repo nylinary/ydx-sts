@@ -36,6 +36,97 @@ let playQueue = [];
 let playingSource = null;
 let playPumpRunning = false;
 
+let workletNode = null;
+let workletReady = false;
+
+async function ensureWorkletPlayer(sampleRate = 44100) {
+  const ctx = ensureAudioCtx();
+  await resumeAudioIfNeeded();
+
+  if (workletReady) return;
+
+  // Create a small AudioWorklet processor from a Blob
+  const workletCode = `
+  class PcmPlayerProcessor extends AudioWorkletProcessor {
+    constructor() {
+      super();
+      this.buffer = [];
+      this.samples = 0;
+      this.port.onmessage = (e) => {
+        const data = e.data;
+        if (data && data.type === 'push' && data.pcm) {
+          // data.pcm is Int16Array
+          this.buffer.push(data.pcm);
+        } else if (data && data.type === 'clear') {
+          this.buffer = [];
+          this.samples = 0;
+        }
+      };
+    }
+
+    process(inputs, outputs) {
+      const out = outputs[0][0];
+      let offset = 0;
+
+      while (offset < out.length) {
+        if (this.buffer.length === 0) {
+          // silence
+          for (let i = offset; i < out.length; i++) out[i] = 0;
+          break;
+        }
+
+        const chunk = this.buffer[0];
+        const needed = out.length - offset;
+        const take = Math.min(needed, chunk.length);
+
+        for (let i = 0; i < take; i++) {
+          out[offset + i] = chunk[i] / 32768;
+        }
+
+        if (take === chunk.length) {
+          this.buffer.shift();
+        } else {
+          this.buffer[0] = chunk.subarray(take);
+        }
+
+        offset += take;
+      }
+
+      return true;
+    }
+  }
+  registerProcessor('pcm-player', PcmPlayerProcessor);
+  `;
+
+  const blob = new Blob([workletCode], { type: "application/javascript" });
+  const url = URL.createObjectURL(blob);
+
+  try {
+    await ctx.audioWorklet.addModule(url);
+    workletNode = new AudioWorkletNode(ctx, "pcm-player", {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+    });
+    workletNode.connect(ctx.destination);
+    workletReady = true;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function workletClear() {
+  if (workletNode) {
+    workletNode.port.postMessage({ type: "clear" });
+  }
+}
+
+function workletPushPcm16(pcm16) {
+  if (workletNode) {
+    workletNode.port.postMessage({ type: "push", pcm: pcm16 });
+  }
+}
+
 function clearPlayback() {
   playQueue = [];
   try {
@@ -48,6 +139,7 @@ function clearPlayback() {
     // ignore
   }
   playingSource = null;
+  workletClear();
 }
 
 async function pumpPlayback() {
@@ -98,6 +190,18 @@ async function pumpPlayback() {
 }
 
 function enqueuePcm16Base64(b64, sampleRate = 44100) {
+  // Try streaming player first.
+  const ctx = ensureAudioCtx();
+  if (ctx.audioWorklet) {
+    void ensureWorkletPlayer(sampleRate).then(() => {
+      const bytes = b64ToBytes(b64);
+      const pcm16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
+      workletPushPcm16(pcm16);
+    });
+    return;
+  }
+
+  // Fallback: old queue-based playback
   playQueue.push({ b64, sampleRate });
   void pumpPlayback();
 }
