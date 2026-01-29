@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Realtime Voice Agent (SPA)</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="header">
+        <h1>Realtime Voice Agent</h1>
+        <p class="sub">
+          Одностраничное приложение: микрофон → Realtime API → текст/аудио.
+        </p>
+      </header>
+
+      <section class="card">
+        <div class="row">
+          <button id="btnToggle" class="btn">Start</button>
+          <label class="chk">
+            <input id="chkServerVad" type="checkbox" checked /> server VAD
+          </label>
+          <label class="chk">
+            <input id="chkAutoResponse" type="checkbox" checked /> auto response.create
+          </label>
+
+          <label class="chk" for="selVoice">voice</label>
+          <select id="selVoice" class="select">
+            <option value="dasha" selected>dasha</option>
+            <option value="alena">alena</option>
+            <option value="filipp">filipp</option>
+            <option value="ermil">ermil</option>
+            <option value="jane">jane</option>
+            <option value="omazh">omazh</option>
+            <option value="zahar">zahar</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <input
+            id="txtInstructions"
+            class="input"
+            value="Ты вежливый русскоязычный ассистент. Отвечай кратко."
+          />
+        </div>
+
+        <div class="grid">
+          <div>
+            <h3>Логи</h3>
+            <pre id="log" class="log"></pre>
+          </div>
+          <div>
+            <h3>Статус</h3>
+            <div id="status" class="status">idle</div>
+            <div class="hint">
+              Речь захватывается через WebAudio и отправляется PCM16@24kHz.
+              Ответ воспроизводится через AudioContext.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <small>
+          Backend WS proxy: <code>/ws</code>. Код: <code>server.py</code>.
+        </small>
+      </footer>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
