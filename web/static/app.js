@@ -75,6 +75,11 @@ function playPcm16Base64(b64, sampleRate = 44100) {
   src.start();
 }
 
+function getModalities() {
+  // The API expects modalities values: "audio" and/or "text".
+  return ["audio", "text"];
+}
+
 // ===== session init =====
 function sendSessionUpdate() {
   const instructions = $("txtInstructions").value || "";
@@ -85,7 +90,7 @@ function sendSessionUpdate() {
     type: "session.update",
     session: {
       instructions,
-      output_modalities: ["text", "audio"],
+      output_modalities: getModalities(),
       audio: {
         input: {
           format: { type: "audio/pcm", rate: IN_RATE, channels: 1 },
@@ -98,7 +103,6 @@ function sendSessionUpdate() {
           voice,
         },
       },
-      // tools можно добавить позже — для минимального примера не нужно
     },
   };
 
@@ -117,7 +121,7 @@ function maybeAutoResponseCreate() {
   if (!$("chkAutoResponse").checked) return;
   const payload = {
     type: "response.create",
-    response: { modalities: ["audio", "text"], conversation: "default" },
+    response: { modalities: getModalities(), conversation: "default" },
   };
   ws.send(JSON.stringify(payload));
 }
