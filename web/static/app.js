@@ -216,7 +216,8 @@ function start() {
   $("btnToggle").textContent = "Stop";
   setStatus("connecting...");
 
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  const wsScheme = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${wsScheme}://${location.host}/ws`);
 
   ws.onopen = async () => {
     setStatus("connected");
@@ -273,13 +274,15 @@ function start() {
     // log("[event]", t);
   };
 
-  ws.onclose = () => {
-    log("WS closed");
+  ws.onclose = (ev) => {
+    const reason = (ev && typeof ev.reason === "string" ? ev.reason : "").trim();
+    log(`WS closed (code=${ev.code}, reason=${reason})`);
     setStatus("closed");
   };
 
   ws.onerror = (e) => {
     log("WS error", e);
+    setStatus("ws error");
   };
 }
 
