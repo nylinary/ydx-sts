@@ -11,6 +11,26 @@ let sourceNode = null;
 let processorNode = null;
 let playing = false;
 
+// Reconnect backoff
+let reconnectAttempt = 0;
+let reconnectTimer = null;
+
+function scheduleReconnect() {
+  if (!playing) return;
+  if (reconnectTimer) return;
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempt), 15000);
+  reconnectAttempt += 1;
+  log(`[ws] reconnect in ${delay}ms`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    try {
+      start();
+    } catch (_) {
+      scheduleReconnect();
+    }
+  }, delay);
+}
+
 // ===== audio playback queue (prevents overlapping responses) =====
 let playQueue = [];
 let playingSource = null;
@@ -36,7 +56,14 @@ async function pumpPlayback() {
 
   try {
     const ctx = ensureAudioCtx();
+    await resumeAudioIfNeeded();
+
     while (playing && playQueue.length) {
+      // If context got suspended mid-play, resume.
+      if (ctx.state !== "running") {
+        await resumeAudioIfNeeded();
+      }
+
       const { b64, sampleRate } = playQueue.shift();
       const bytes = b64ToBytes(b64);
       const pcm16 = new Int16Array(
@@ -62,6 +89,11 @@ async function pumpPlayback() {
     }
   } finally {
     playPumpRunning = false;
+
+    // If queue still has items but we exited (rare), restart.
+    if (playing && playQueue.length) {
+      void pumpPlayback();
+    }
   }
 }
 
@@ -115,8 +147,28 @@ function ensureAudioCtx() {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)({
       latencyHint: "interactive",
     });
+
+    // If the context gets suspended (mobile/tab switch), try to resume.
+    audioCtx.onstatechange = () => {
+      log(`[audio] state=${audioCtx.state}`);
+      if (audioCtx.state === "suspended" && playing) {
+        void audioCtx.resume().catch(() => {});
+      }
+    };
   }
   return audioCtx;
+}
+
+async function resumeAudioIfNeeded() {
+  const ctx = ensureAudioCtx();
+  if (ctx.state !== "running") {
+    try {
+      await ctx.resume();
+      log("[audio] resumed");
+    } catch {
+      // ignore
+    }
+  }
 }
 
 function playPcm16Base64(b64, sampleRate = 44100) {
@@ -263,6 +315,8 @@ async function stopMic() {
 function start() {
   if (playing) return;
   playing = true;
+  reconnectAttempt = 0;
+
   $("btnToggle").classList.add("on");
   $("btnToggle").textContent = "Stop";
   setStatus("connecting...");
@@ -274,15 +328,13 @@ function start() {
     setStatus("connected");
     log("WS connected");
 
+    await resumeAudioIfNeeded();
+
     sendSessionUpdate();
 
     // start mic after session update
     await startMic();
     log("Mic started");
-
-    // If you disabled server vad, you may want to trigger response manually.
-    // With server vad, backend will decide when to respond.
-    // We still offer auto response.create toggle.
   };
 
   ws.onmessage = (ev) => {
@@ -337,6 +389,9 @@ function start() {
     const reason = (ev && typeof ev.reason === "string" ? ev.reason : "").trim();
     log(`WS closed (code=${ev.code}, reason=${reason})`);
     setStatus("closed");
+
+    // Auto-reconnect if it dropped unexpectedly.
+    scheduleReconnect();
   };
 
   ws.onerror = (e) => {
@@ -348,6 +403,11 @@ function start() {
 async function stop() {
   if (!playing) return;
   playing = false;
+
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
 
   $("btnToggle").classList.remove("on");
   $("btnToggle").textContent = "Start";
@@ -367,6 +427,12 @@ async function stop() {
   ws = null;
   setStatus("idle");
 }
+
+// Try to keep AudioContext alive (tab switching may suspend it)
+setInterval(() => {
+  if (!playing) return;
+  void resumeAudioIfNeeded();
+}, 3000);
 
 $("btnToggle").addEventListener("click", async () => {
   if (!playing) start();
