@@ -208,25 +208,49 @@ function sendSessionUpdate() {
   ws.send(JSON.stringify(payload));
 }
 
-// When user changes voice while connected, push a new session.update.
+// When user changes voice while connected: restart the session cleanly.
 $("selVoice")?.addEventListener("change", async () => {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    const v = $("selVoice").value;
-    log(`[ui] voice = ${v}`);
+  const v = $("selVoice")?.value;
+  log(`[ui] voice = ${v}`);
 
-    // Stop any currently playing audio to avoid overlapping/half-switched streams.
-    clearPlayback();
+  // No active session: nothing else to do.
+  if (!playing) return;
 
-    // Make sure AudioContext is running
-    await resumeAudioIfNeeded();
+  // Restart everything so new voice is guaranteed to apply.
+  setStatus("restarting...");
 
-    // Re-apply session config (voice, etc.)
-    sendSessionUpdate();
-
-    // Do NOT send response.cancel here: server can respond with
-    // "no such response: unknown_response" and the session may get into a bad state.
-    log("[ui] voice applied (will affect next response)");
+  try {
+    await stopMic();
+  } catch {
+    // ignore
   }
+
+  clearPlayback();
+
+  try {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      ws.onopen = null;
+      ws.close();
+    }
+  } catch {
+    // ignore
+  }
+
+  ws = null;
+
+  // Reconnect with updated voice
+  reconnectAttempt = 0;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  // Start a fresh session
+  playing = false;
+  start();
 });
 
 function maybeAutoResponseCreate() {
