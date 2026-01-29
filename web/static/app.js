@@ -11,6 +11,65 @@ let sourceNode = null;
 let processorNode = null;
 let playing = false;
 
+// ===== audio playback queue (prevents overlapping responses) =====
+let playQueue = [];
+let playingSource = null;
+let playPumpRunning = false;
+
+function clearPlayback() {
+  playQueue = [];
+  try {
+    if (playingSource) {
+      playingSource.onended = null;
+      playingSource.stop();
+      playingSource.disconnect();
+    }
+  } catch (_) {
+    // ignore
+  }
+  playingSource = null;
+}
+
+async function pumpPlayback() {
+  if (playPumpRunning) return;
+  playPumpRunning = true;
+
+  try {
+    const ctx = ensureAudioCtx();
+    while (playing && playQueue.length) {
+      const { b64, sampleRate } = playQueue.shift();
+      const bytes = b64ToBytes(b64);
+      const pcm16 = new Int16Array(
+        bytes.buffer,
+        bytes.byteOffset,
+        bytes.byteLength / 2
+      );
+
+      const audioBuffer = ctx.createBuffer(1, pcm16.length, sampleRate);
+      const channel = audioBuffer.getChannelData(0);
+      for (let i = 0; i < pcm16.length; i++) channel[i] = pcm16[i] / 32768;
+
+      await new Promise((resolve) => {
+        const src = ctx.createBufferSource();
+        playingSource = src;
+        src.buffer = audioBuffer;
+        src.connect(ctx.destination);
+        src.onended = () => resolve();
+        src.start();
+      });
+
+      playingSource = null;
+    }
+  } finally {
+    playPumpRunning = false;
+  }
+}
+
+function enqueuePcm16Base64(b64, sampleRate = 44100) {
+  playQueue.push({ b64, sampleRate });
+  void pumpPlayback();
+}
+
 // ===== utils =====
 function log(...args) {
   const el = $("log");
@@ -61,18 +120,8 @@ function ensureAudioCtx() {
 }
 
 function playPcm16Base64(b64, sampleRate = 44100) {
-  const ctx = ensureAudioCtx();
-  const bytes = b64ToBytes(b64);
-  const pcm16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
-
-  const audioBuffer = ctx.createBuffer(1, pcm16.length, sampleRate);
-  const channel = audioBuffer.getChannelData(0);
-  for (let i = 0; i < pcm16.length; i++) channel[i] = pcm16[i] / 32768;
-
-  const src = ctx.createBufferSource();
-  src.buffer = audioBuffer;
-  src.connect(ctx.destination);
-  src.start();
+  // Deprecated direct playback; keep for compatibility.
+  enqueuePcm16Base64(b64, sampleRate);
 }
 
 function getModalities() {
@@ -259,7 +308,14 @@ function start() {
     }
 
     if (t === "response.output_audio.delta") {
-      if (msg.delta) playPcm16Base64(msg.delta, 44100);
+      if (msg.delta) enqueuePcm16Base64(msg.delta, 44100);
+      return;
+    }
+
+    // Clear playback when user starts speaking or on new response start,
+    // so old TTS doesn't bleed into the new one.
+    if (t === "input_audio_buffer.speech_started" || t === "response.created") {
+      clearPlayback();
       return;
     }
 
@@ -279,6 +335,7 @@ function start() {
   };
 
   ws.onclose = (ev) => {
+    clearPlayback();
     const reason = (ev && typeof ev.reason === "string" ? ev.reason : "").trim();
     log(`WS closed (code=${ev.code}, reason=${reason})`);
     setStatus("closed");
@@ -299,6 +356,7 @@ async function stop() {
   setStatus("stopping...");
 
   await stopMic();
+  clearPlayback();
 
   try {
     if (ws && ws.readyState === WebSocket.OPEN) {
